@@ -118,6 +118,20 @@ public class FireIncidentService {
         return repository.save(incident);
     }
 
+    // Role-scoped feed for the web dashboard: recorders see only their own ward (all statuses),
+    // supervisors/admins see everything for this hazard. No headers -> approved-only consumers
+    // (dashboard/report services) keep using findAllApproved().
+    public List<FireIncident> findAllScoped(String callerRole, String callerWard, String callerHazard) {
+        if (callerHazard != null && !callerHazard.isBlank()
+                && !"*".equals(callerHazard) && !callerHazard.equalsIgnoreCase("fire")) {
+            throw new ForbiddenOperationException("This account is not authorised for the fire hazard");
+        }
+        if ("WARD_RECORDER".equalsIgnoreCase(callerRole) && callerWard != null && !callerWard.isBlank()) {
+            return repository.findByWard(callerWard);
+        }
+        return repository.findAll();
+    }
+
     // ---------- Scoping rules ----------
 
     // FR-SCOPE-01: every account is bound to ONE hazard. Anything else is rejected at the door.
