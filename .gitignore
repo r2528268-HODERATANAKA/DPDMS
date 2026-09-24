@@ -1,0 +1,12 @@
+# Maven build output
+target/
+*.class
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Local environment (never commit real credentials)
+.env

@@ -1,11 +1,12 @@
 package com.dpdms.auth_service.model;
 
-// The three roles from the project brief. A user's role decides which claims their token
-// carries and therefore what the hazard services will let them do:
+// The three DPDMS roles (from the marking guide):
 //
-//   WARD_RECORDER         - must have a CONCRETE ward + hazard (FR-SCOPE-01, no wildcards)
-//   PROVINCIAL_SUPERVISOR - must have a hazard; reviews/approves records for that hazard
-//   PROVINCIAL_ADMIN      - creates accounts and oversees the whole province
+// WARD_RECORDER        - captures incidents in ONE ward for ONE hazard.
+//                        Must have a concrete ward + hazard on the account (FR-SCOPE-01).
+// PROVINCIAL_SUPERVISOR- approves/rejects/returns records for ONE hazard across all wards.
+//                        Must have a concrete hazard; ward stays empty.
+// PROVINCIAL_ADMIN     - creates accounts and manages users. No ward/hazard restriction.
 public enum Role {
     WARD_RECORDER,
     PROVINCIAL_SUPERVISOR,

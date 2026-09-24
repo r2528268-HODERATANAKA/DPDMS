@@ -1,9 +1,7 @@
 package com.dpdms.fire_service.model;
 
-/**
- * Fifth mandatory fire indicator: whether the blaze is still burning or under control.
- * Reported at capture time and updated as the situation evolves.
- */
+// Status of the fire itself at the time of reporting:
+// ACTIVE = still burning, CONTAINED = fire brigade has it under control
 public enum FireStatus {
     ACTIVE,
     CONTAINED

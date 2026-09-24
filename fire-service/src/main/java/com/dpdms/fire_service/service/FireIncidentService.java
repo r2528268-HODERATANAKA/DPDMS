@@ -1,205 +1,138 @@
 package com.dpdms.fire_service.service;
 
-import com.dpdms.fire_service.event.IncidentEvent;
-import com.dpdms.fire_service.event.IncidentEventPublisher;
+import com.dpdms.fire_service.exception.ForbiddenOperationException;
 import com.dpdms.fire_service.exception.ResourceNotFoundException;
 import com.dpdms.fire_service.model.FireIncident;
 import com.dpdms.fire_service.model.IncidentStatus;
 import com.dpdms.fire_service.repository.FireIncidentRepository;
-import com.dpdms.fire_service.security.AuthContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * Fire incident business logic: RBAC scoping, the workflow state machine and the
- * asynchronous alert publication on approval.
- *
- * Every method first consults the JWT scope via AuthContext - the backend half of the
- * RBAC matrix (the frontend only hides UI).
- */
 @Service
 @RequiredArgsConstructor
 public class FireIncidentService {
 
-    public static final String HAZARD = "fire";
-
     private final FireIncidentRepository repository;
-    private final IncidentEventPublisher eventPublisher;
+    private final AlertNotifier alertNotifier;
 
-    // ------------------------------------------------------------------
-    // Queries (visibility per role)
-    // ------------------------------------------------------------------
-
-    @Transactional(readOnly = true)
-    public List<FireIncident> list() {
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
-        if (AuthContext.isWardRecorder()) {
-            return repository.findByWard(AuthContext.ward());
-        }
-        return repository.findAll();
-    }
-
-    /** Approved-only feed for the dashboard/report services. */
-    @Transactional(readOnly = true)
-    public List<FireIncident> listApproved() {
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
-        return repository.findByStatus(IncidentStatus.APPROVED);
-    }
-
-    @Transactional(readOnly = true)
-    public List<FireIncident> listForWard(String ward) {
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
-        AuthContext.require(AuthContext.canAccessWard(ward),
-                "You may only view incidents of your own ward");
-        return repository.findByWard(ward);
-    }
-
-    @Transactional(readOnly = true)
-    public FireIncident get(Long id) {
-        FireIncident incident = find(id);
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD)
-                        && AuthContext.canAccessWard(incident.getWard()),
-                "You may not view this incident");
-        return incident;
-    }
-
-    // ------------------------------------------------------------------
-    // Commands (capture + workflow)
-    // ------------------------------------------------------------------
-
-    @Transactional
-    public FireIncident create(FireIncident incident) {
-        AuthContext.require(AuthContext.canCaptureIncidents(), "Only ward recorders capture incidents");
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
-        AuthContext.require(AuthContext.canAccessWard(incident.getWard()),
-                "You may only capture incidents for your own ward (" + AuthContext.ward() + ")");
-
-        incident.setId(null);
+    // ---------- Create ----------
+    // NOTE: once auth-service issues JWTs and the gateway decodes them, callerWard/callerHazard
+    // will arrive from the token's claims instead of headers — the scoping rules stay the same.
+    public FireIncident create(FireIncident incident, String callerWard, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        enforceWardScope(incident.getWard(), callerWard);
         incident.setStatus(IncidentStatus.PENDING);
-        incident.setReviewedBy(null);
-        incident.setReviewedAt(null);
-        incident.setReviewNotes(null);
         incident.setCreatedAt(LocalDateTime.now());
         return repository.save(incident);
     }
 
-    @Transactional
-    public FireIncident update(Long id, FireIncident updated) {
-        AuthContext.require(AuthContext.canCaptureIncidents(), "Only ward recorders edit incidents");
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
+    // ---------- Read ----------
 
-        FireIncident existing = find(id);
-        AuthContext.require(AuthContext.canAccessWard(existing.getWard()),
-                "You may only edit incidents of your own ward");
-        AuthContext.require(AuthContext.canAccessWard(updated.getWard()),
-                "You may only move an incident within your own ward");
-        if (!existing.isEditable()) {
-            throw new IllegalStateException(
-                    "Incident is " + existing.getStatus() + " and can no longer be edited");
+    public List<FireIncident> findAllApproved() {
+        return repository.findByStatus(IncidentStatus.APPROVED);
+    }
+
+    public List<FireIncident> findAllForWard(String ward) {
+        return repository.findByWard(ward);
+    }
+
+    public FireIncident findById(Long id) {
+        return repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Fire incident " + id + " not found"));
+    }
+
+    // ---------- Update (recorder editing a record still in PENDING or sent back for corrections) ----------
+
+    public FireIncident update(Long id, FireIncident updated, String callerWard, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        FireIncident existing = findById(id);
+        enforceWardScope(existing.getWard(), callerWard);
+
+        if (existing.getStatus() == IncidentStatus.APPROVED) {
+            throw new ForbiddenOperationException("Approved records cannot be edited directly");
         }
 
-        copyFields(existing, updated);
+        existing.setDistrict(updated.getDistrict());
+        existing.setProvince(updated.getProvince());
+        existing.setOccurredAt(updated.getOccurredAt());
+        existing.setReporter(updated.getReporter());
+        existing.setSeverity(updated.getSeverity());
+        existing.setLatitude(updated.getLatitude());
+        existing.setLongitude(updated.getLongitude());
+        existing.setAreaBurnedHectares(updated.getAreaBurnedHectares());
+        existing.setSuspectedCause(updated.getSuspectedCause());
+        existing.setInjuries(updated.getInjuries());
+        existing.setFatalities(updated.getFatalities());
+        existing.setStructuresDestroyed(updated.getStructuresDestroyed());
+        existing.setFireStatus(updated.getFireStatus());
+
         existing.setStatus(IncidentStatus.PENDING); // resubmitted after edit
+
         return repository.save(existing);
     }
 
-    @Transactional
-    public void delete(Long id) {
-        AuthContext.require(AuthContext.canCaptureIncidents(), "Only ward recorders delete incidents");
-        AuthContext.require(AuthContext.canAccessHazard(HAZARD),
-                "Your scope does not include the fire hazard");
+    // ---------- Delete ----------
 
-        FireIncident existing = find(id);
-        AuthContext.require(AuthContext.canAccessWard(existing.getWard()),
-                "You may only delete incidents of your own ward");
+    public void delete(Long id, String callerWard, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        FireIncident existing = findById(id);
+        enforceWardScope(existing.getWard(), callerWard);
         repository.delete(existing);
     }
 
-    public FireIncident approve(Long id, String comment) {
-        return review(id, IncidentStatus.APPROVED, comment);
-    }
+    // ---------- Approval workflow (provincial supervisor for this hazard only) ----------
 
-    public FireIncident reject(Long id, String comment) {
-        return review(id, IncidentStatus.REJECTED, comment);
-    }
-
-    public FireIncident requestCorrections(Long id, String comment) {
-        return review(id, IncidentStatus.CORRECTIONS_REQUESTED, comment);
-    }
-
-    @Transactional
-    public FireIncident review(Long id, IncidentStatus decision, String comment) {
-        AuthContext.require(AuthContext.canReview(HAZARD),
-                "You are not allowed to review fire incidents");
-
-        FireIncident incident = find(id);
-        incident.applyReview(decision, AuthContext.fullName(), comment);
+    public FireIncident approve(Long id, String reviewer, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        FireIncident incident = findById(id);
+        incident.setStatus(IncidentStatus.APPROVED);
+        incident.setReviewedBy(reviewer);
+        incident.setReviewedAt(LocalDateTime.now());
         FireIncident saved = repository.save(incident);
-
-        if (decision == IncidentStatus.APPROVED) {
-            publishApproved(saved);
-        }
+        // Best-effort notification of alert-service (email / WhatsApp / Telegram).
+        // This fulfils the integration TODO in flood-service; it never blocks an approval.
+        alertNotifier.notifyApproved(saved);
         return saved;
     }
 
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
+    public FireIncident reject(Long id, String reviewer, String reason, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        FireIncident incident = findById(id);
+        incident.setStatus(IncidentStatus.REJECTED);
+        incident.setReviewedBy(reviewer);
+        incident.setReviewedAt(LocalDateTime.now());
+        incident.setReviewNotes(reason);
+        return repository.save(incident);
+    }
 
-    private void publishApproved(FireIncident incident) {
-        IncidentEvent event = new IncidentEvent();
-        event.setIncidentId(incident.getId());
-        event.setHazardType(incident.getHazardType());
-        event.setWard(incident.getWard());
-        event.setDistrict(incident.getDistrict());
-        event.setProvince(incident.getProvince());
-        event.setSeverity(incident.getSeverity().name());
-        event.setSeverityRank(incident.getSeverity().rank()); // polymorphic call
-        event.setLatitude(incident.getLatitude());
-        event.setLongitude(incident.getLongitude());
-        event.setOccurredAt(incident.getOccurredAt() == null ? null : incident.getOccurredAt().toString());
-        event.setReporter(incident.getReporter());
-        event.setRecommendedActions(List.of(
-                "Alert the nearest fire response team",
-                "Establish a firebreak ahead of the fire front in " + incident.getWard(),
-                "Move livestock and people out of the fire path"));
-        IncidentEventPublisher.approvedNow(event, AuthContext.fullName());
-        try {
-            eventPublisher.publishApproved(event);
-        } catch (Exception e) {
-            // FR-ALR: alert fan-out is asynchronous - approval must never fail or block
-            // because the broker is unavailable. The audit trail stays intact.
+    public FireIncident requestCorrections(Long id, String reviewer, String notes, String callerHazard) {
+        enforceHazardScope(callerHazard);
+        FireIncident incident = findById(id);
+        incident.setStatus(IncidentStatus.CORRECTIONS_REQUESTED);
+        incident.setReviewedBy(reviewer);
+        incident.setReviewedAt(LocalDateTime.now());
+        incident.setReviewNotes(notes);
+        return repository.save(incident);
+    }
+
+    // ---------- Scoping rules ----------
+
+    // FR-SCOPE-01: every account is bound to ONE hazard. Anything else is rejected at the door.
+    private void enforceHazardScope(String callerHazard) {
+        if (callerHazard == null || !callerHazard.equalsIgnoreCase("fire")) {
+            throw new ForbiddenOperationException(
+                    "This account is not authorised for the fire hazard");
         }
     }
 
-    private FireIncident find(Long id) {
-        return repository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Fire incident not found: " + id));
-    }
-
-    private void copyFields(FireIncident target, FireIncident src) {
-        target.setWard(src.getWard());
-        target.setDistrict(src.getDistrict());
-        target.setProvince(src.getProvince());
-        target.setOccurredAt(src.getOccurredAt());
-        target.setReporter(src.getReporter());
-        target.setSeverity(src.getSeverity());
-        target.setLatitude(src.getLatitude());
-        target.setLongitude(src.getLongitude());
-        target.setAreaBurnedHectares(src.getAreaBurnedHectares());
-        target.setSuspectedCause(src.getSuspectedCause());
-        target.setInjuries(src.getInjuries());
-        target.setFatalities(src.getFatalities());
-        target.setStructuresDestroyed(src.getStructuresDestroyed());
-        target.setFireStatus(src.getFireStatus());
+    // FR-SCOPE-01: ward recorders may only touch records of their own ward.
+    private void enforceWardScope(String recordWard, String callerWard) {
+        if (callerWard == null || !callerWard.equalsIgnoreCase(recordWard)) {
+            throw new ForbiddenOperationException(
+                    "This account is not authorised to act on records for ward: " + recordWard);
+        }
     }
 }

@@ -1,0 +1,117 @@
+### DPDMS demo requests (IntelliJ HTTP Client format)
+### Run top to bottom for the full demo. Swagger-style docs: docs/03-API-REFERENCE.md
+
+### 0. Login as the seeded admin (see auth-service README for the bootstrap SQL)
+# @name admin
+POST http://localhost:8888/api/auth/login
+Content-Type: application/json
+
+{"username": "admin", "password": "Passw0rd!"}
+
+### Create the accounts for the demo (admin token required - paste from step 0)
+POST http://localhost:8888/api/auth/users
+Authorization: Bearer {{admin.response.body.$.token}}
+Content-Type: application/json
+
+{"username": "sean", "password": "Passw0rd!", "fullName": "T. Chirwa", "role": "WARD_RECORDER", "ward": "Mudzi", "hazard": "fire"}
+
+###
+
+POST http://localhost:8888/api/auth/users
+Authorization: Bearer {{admin.response.body.$.token}}
+Content-Type: application/json
+
+{"username": "oliver", "password": "Passw0rd!", "fullName": "Mrs Moyo", "role": "PROVINCIAL_SUPERVISOR", "hazard": "fire"}
+
+### 1. Login as the fire recorder
+# @name recorder
+POST http://localhost:8888/api/auth/login
+Content-Type: application/json
+
+{"username": "sean", "password": "Passw0rd!"}
+
+### 2. Recorder captures a fire incident (status comes back PENDING)
+# @name created
+POST http://localhost:8888/api/fires
+Authorization: Bearer {{recorder.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "ward": "Mudzi", "district": "Mudzi", "province": "Mashonaland Central",
+  "occurredAt": "2026-09-20T14:30:00", "reporter": "T. Chirwa",
+  "severity": "HIGH", "latitude": -17.4, "longitude": 31.6,
+  "areaBurnedHectares": 45.5, "suspectedCause": "Land clearing fire that spread",
+  "injuries": 1, "fatalities": 0, "structuresDestroyed": 2, "fireStatus": "ACTIVE"
+}
+
+### 3. Try to approve as the RECORDER -> must be 403 (recorders cannot review)
+PATCH http://localhost:8888/api/fires/{{created.response.body.$.id}}/approve
+Authorization: Bearer {{recorder.response.body.$.token}}
+
+### 4. Login as the fire supervisor
+# @name supervisor
+POST http://localhost:8888/api/auth/login
+Content-Type: application/json
+
+{"username": "oliver", "password": "Passw0rd!"}
+
+### 5. Supervisor approves -> audit fields set + alert-service notified
+PATCH http://localhost:8888/api/fires/{{created.response.body.$.id}}/approve
+Authorization: Bearer {{supervisor.response.body.$.token}}
+
+### 6. Try to EDIT the approved record -> 403 (approved records are locked)
+PUT http://localhost:8888/api/fires/{{created.response.body.$.id}}
+Authorization: Bearer {{recorder.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "ward": "Mudzi", "district": "Mudzi", "province": "Mashonaland Central",
+  "occurredAt": "2026-09-20T15:00:00", "reporter": "T. Chirwa",
+  "severity": "CRITICAL", "latitude": -17.4, "longitude": 31.6,
+  "areaBurnedHectares": 60, "suspectedCause": "Updated cause",
+  "injuries": 2, "fatalities": 0, "structuresDestroyed": 3, "fireStatus": "CONTAINED"
+}
+
+### 7. Supervisor requests corrections on a second incident (create one first)
+POST http://localhost:8888/api/fires
+Authorization: Bearer {{recorder.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "ward": "Mudzi", "district": "Mudzi", "province": "Mashonaland Central",
+  "occurredAt": "2026-09-22T11:00:00", "reporter": "T. Chirwa",
+  "severity": "MEDIUM", "latitude": -17.2, "longitude": 31.7,
+  "areaBurnedHectares": 8, "suspectedCause": "Bee smoking",
+  "injuries": 0, "fatalities": 0, "structuresDestroyed": 0, "fireStatus": "CONTAINED"
+}
+
+###
+
+PATCH http://localhost:8888/api/fires/2/request-corrections
+Authorization: Bearer {{supervisor.response.body.$.token}}
+Content-Type: application/json
+
+{"notes": "Confirm the area burned with the forestry office"}
+
+### 8. Approved-only feed (what reports, dashboard and alerts consume)
+GET http://localhost:8888/api/fires
+
+### 9. Reports in four formats (Rejoice's report-service)
+GET http://localhost:8888/api/reports/fires?format=pdf
+
+###
+
+GET http://localhost:8888/api/reports/fires?format=xlsx
+Authorization: Bearer {{supervisor.response.body.$.token}}
+
+### 10. Alert log (Todzani's alert-service - see the approval produced rows)
+GET http://localhost:8888/api/alerts
+
+### 11. Pull approved incidents from ALL five hazards and alert new ones
+POST http://localhost:8888/api/alerts/scan
+
+### 12. Dashboard summary (Oliver's dashboard-service)
+GET http://localhost:8888/api/dashboard/summary
+
+### 13. Health check per hazard service
+GET http://localhost:8888/api/dashboard/health

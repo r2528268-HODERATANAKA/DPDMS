@@ -1,6 +1,8 @@
 package com.dpdms.fire_service.exception;
 
-/** Caller is authenticated but out of scope -> HTTP 403. */
+// Thrown when the caller is not allowed to do the action
+// (for example a drought recorder trying to save a fire incident).
+// GlobalExceptionHandler turns this into HTTP 403 Forbidden.
 public class ForbiddenOperationException extends RuntimeException {
     public ForbiddenOperationException(String message) {
         super(message);

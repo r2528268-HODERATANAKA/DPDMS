@@ -1,6 +1,6 @@
 package com.dpdms.auth_service.exception;
 
-/** Resource already exists -> HTTP 409. */
+// Duplicate username on account creation -> HTTP 409 Conflict.
 public class DuplicateResourceException extends RuntimeException {
     public DuplicateResourceException(String message) {
         super(message);

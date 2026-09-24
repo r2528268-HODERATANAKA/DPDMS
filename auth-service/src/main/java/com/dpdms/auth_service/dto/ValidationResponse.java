@@ -1,14 +1,22 @@
 package com.dpdms.auth_service.dto;
 
-import java.time.Instant;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
-/** Response of GET /api/v1/auth/validate - the decoded scope of a token. */
-public record ValidationResponse(
-        boolean valid,
-        String username,
-        String role,
-        String ward,
-        String hazard,
-        String fullName,
-        Instant expiresAt) {
+// Response of GET /api/auth/validate - tells the caller (usually the gateway)
+// who is behind a token and whether the account is still usable.
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ValidationResponse {
+
+    private boolean valid;
+    private String username;
+    private String role;
+    private String name;
+    private String ward;
+    private String hazard;
 }

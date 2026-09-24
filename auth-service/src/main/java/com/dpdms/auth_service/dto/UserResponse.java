@@ -1,22 +1,23 @@
 package com.dpdms.auth_service.dto;
 
-import com.dpdms.auth_service.model.UserAccount;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
-/** Safe user projection - never exposes the password hash. */
-public record UserResponse(
-        Long id,
-        String username,
-        String fullName,
-        String email,
-        String phone,
-        String role,
-        String ward,
-        String hazard,
-        boolean active) {
+// Safe view of a user account - the password hash is NEVER included.
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class UserResponse {
 
-    public static UserResponse from(UserAccount u) {
-        return new UserResponse(
-                u.getId(), u.getUsername(), u.getFullName(), u.getEmail(), u.getPhone(),
-                u.getRole().name(), u.getWard(), u.getHazard(), u.isActive());
-    }
+    private Long id;
+    private String username;
+    private String fullName;
+    private String role;
+    private String ward;
+    private String hazard;
+    private Boolean active;
+    private java.time.LocalDateTime createdAt;
 }

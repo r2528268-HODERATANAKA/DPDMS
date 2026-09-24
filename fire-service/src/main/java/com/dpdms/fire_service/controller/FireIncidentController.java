@@ -1,95 +1,98 @@
 package com.dpdms.fire_service.controller;
 
-import com.dpdms.fire_service.dto.ReviewDecision;
 import com.dpdms.fire_service.model.FireIncident;
 import com.dpdms.fire_service.service.FireIncidentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
-/**
- * REST endpoints of the fire service (gateway routes /api/v1/fire/**):
- *
- *   POST   /api/v1/fire/incidents                       capture (ward recorder, own ward)
- *   GET    /api/v1/fire/incidents                       list (role-scoped)
- *   GET    /api/v1/fire/incidents/approved              approved-only feed
- *   GET    /api/v1/fire/incidents/ward/{ward}           a ward's records
- *   GET    /api/v1/fire/incidents/{id}                  single
- *   PUT    /api/v1/fire/incidents/{id}                  edit + resubmit
- *   DELETE /api/v1/fire/incidents/{id}                  delete (own ward)
- *   POST   /api/v1/fire/incidents/{id}/approve
- *   POST   /api/v1/fire/incidents/{id}/reject
- *   POST   /api/v1/fire/incidents/{id}/request-corrections
- */
+// NOTE ON HEADERS: the gateway decodes the JWT from auth-service and forwards the caller's
+// identity as X-User-Name / X-User-Role / X-User-Ward / X-User-Hazard headers. Reading headers
+// (instead of parsing tokens here) keeps this service simple; when run without the gateway for
+// local testing you add the headers yourself with curl/Postman.
+// See docs/01-ARCHITECTURE.md for the full request flow.
+
 @RestController
-@RequestMapping("/api/v1/fire/incidents")
+@RequestMapping("/api/fires")
 @RequiredArgsConstructor
 public class FireIncidentController {
 
     private final FireIncidentService service;
 
+    @PostMapping
+    public ResponseEntity<FireIncident> create(
+            @Valid @RequestBody FireIncident incident,
+            @RequestHeader("X-User-Ward") String callerWard,
+            @RequestHeader("X-User-Hazard") String callerHazard) {
+        FireIncident created = service.create(incident, callerWard, callerHazard);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    // Approved-only feed — this is what dashboard-service and report-service call
     @GetMapping
-    public List<FireIncident> list() {
-        return service.list();
+    public ResponseEntity<List<FireIncident>> getApproved() {
+        return ResponseEntity.ok(service.findAllApproved());
     }
 
-    @GetMapping("/approved")
-    public List<FireIncident> approved() {
-        return service.listApproved();
-    }
-
+    // A recorder's own ward view, including PENDING records
     @GetMapping("/ward/{ward}")
-    public List<FireIncident> byWard(@PathVariable String ward) {
-        return service.listForWard(ward);
+    public ResponseEntity<List<FireIncident>> getByWard(@PathVariable String ward) {
+        return ResponseEntity.ok(service.findAllForWard(ward));
     }
 
     @GetMapping("/{id}")
-    public FireIncident get(@PathVariable Long id) {
-        return service.get(id);
-    }
-
-    @PostMapping
-    public ResponseEntity<FireIncident> create(@Valid @RequestBody FireIncident incident) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(service.create(incident));
+    public ResponseEntity<FireIncident> getById(@PathVariable Long id) {
+        return ResponseEntity.ok(service.findById(id));
     }
 
     @PutMapping("/{id}")
-    public FireIncident update(@PathVariable Long id, @Valid @RequestBody FireIncident incident) {
-        return service.update(id, incident);
+    public ResponseEntity<FireIncident> update(
+            @PathVariable Long id,
+            @Valid @RequestBody FireIncident incident,
+            @RequestHeader("X-User-Ward") String callerWard,
+            @RequestHeader("X-User-Hazard") String callerHazard) {
+        return ResponseEntity.ok(service.update(id, incident, callerWard, callerHazard));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        service.delete(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Ward") String callerWard,
+            @RequestHeader("X-User-Hazard") String callerHazard) {
+        service.delete(id, callerWard, callerHazard);
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/{id}/approve")
-    public FireIncident approve(@PathVariable Long id,
-                                @RequestBody(required = false) ReviewDecision decision) {
-        return service.approve(id, decision == null ? null : decision.comment());
+    // ---------- Provincial supervisor actions ----------
+
+    @PatchMapping("/{id}/approve")
+    public ResponseEntity<FireIncident> approve(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Name") String reviewer,
+            @RequestHeader("X-User-Hazard") String callerHazard) {
+        return ResponseEntity.ok(service.approve(id, reviewer, callerHazard));
     }
 
-    @PostMapping("/{id}/reject")
-    public FireIncident reject(@PathVariable Long id,
-                               @RequestBody(required = false) ReviewDecision decision) {
-        return service.reject(id, decision == null ? null : decision.comment());
+    @PatchMapping("/{id}/reject")
+    public ResponseEntity<FireIncident> reject(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Name") String reviewer,
+            @RequestHeader("X-User-Hazard") String callerHazard,
+            @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(service.reject(id, reviewer, body.get("reason"), callerHazard));
     }
 
-    @PostMapping("/{id}/request-corrections")
-    public FireIncident requestCorrections(@PathVariable Long id,
-                                           @RequestBody(required = false) ReviewDecision decision) {
-        return service.requestCorrections(id, decision == null ? null : decision.comment());
+    @PatchMapping("/{id}/request-corrections")
+    public ResponseEntity<FireIncident> requestCorrections(
+            @PathVariable Long id,
+            @RequestHeader("X-User-Name") String reviewer,
+            @RequestHeader("X-User-Hazard") String callerHazard,
+            @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(service.requestCorrections(id, reviewer, body.get("notes"), callerHazard));
     }
 }

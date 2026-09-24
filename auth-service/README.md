@@ -1,88 +1,81 @@
 # auth-service
 
-DPDMS authentication service - issues the signed JWTs every other DPDMS service trusts.
-Owned by **Sean**. Standalone Spring Boot 4.1.1 / Java 17 service in the team's
-`flood-service` layout (`controller / service / repository / model / dto / exception`).
+Login + JWT issuing + user account management for the whole DPDMS system.
 
-- Port: `8100`
-- Database: MySQL `dpdms_auth` (team credentials convention: root / Gr@nd$0n)
-- Tech: JPA, JJWT 0.12.6, BCrypt (`spring-boot-starter-security`), Lombok
+**Owner:** Sean   |   **Port:** 8080   |   **Database:** `dpdms_auth` (auto-created)
 
----
+## Files in this service (what each one does)
 
-## TOKEN CONTRACT (what the other services code against)
+| File | What it does |
+|------|--------------|
+| `pom.xml` | Boot 4.1.1 starters + **JJWT 0.12.6** (JWT) + **spring-security-crypto** (BCrypt only — no filter chain) + MySQL + H2 for tests. |
+| `AuthServiceApplication.java` | Entry point (port 8080). |
+| `model/Role.java` | The 3 roles with a comment each explaining what they may do. |
+| `model/UserAccount.java` | JPA entity `user_accounts`. Stores the **BCrypt hash**, never the password. `ward`/`hazard` implement FR-SCOPE-01. |
+| `repository/UserAccountRepository.java` | `findByUsername`, `existsByUsernameIgnoreCase`. |
+| `service/JwtTokenService.java` | Signs and verifies HS256 tokens. Secret must be ≥ 32 chars (startup fails fast otherwise). Adds `ward`/`hazard` claims only when present. |
+| `service/AuthService.java` | The rules: login (401 on bad creds / deactivated), token validation, account creation (admin-only, FR-SCOPE-01 wildcard rejection, duplicate username → 409, BCrypt hashing). |
+| `controller/AuthController.java` | `POST /api/auth/login`, `GET /api/auth/validate`, `POST/GET /api/auth/users` (admin — reads `X-User-Role` header injected by the gateway). |
+| `dto/` | `LoginRequest`, `LoginResponse`, `CreateUserRequest`, `UserResponse` (never leaks the hash), `ValidationResponse`. |
+| `exception/` | `InvalidCredentialsException` → 401, `ForbiddenOperationException` → 403, `DuplicateResourceException` → 409, plus a handler that maps any `JwtException` → 401. |
+| `src/test/resources/application.properties` | Tests run on in-memory H2 with a test secret. |
+| `JwtTokenServiceTest.java` (7 tests) | round-trip claims, admin token has no ward/hazard, expiry window, wrong key rejected, tampered token rejected, garbage rejected, short secret rejected. |
+| `AuthServiceTest.java` (7 tests) | login ok / wrong password / unknown user / deactivated, validate with a REAL issued token, admin-only creation, wildcard ward rejected (FR-SCOPE-01), BCrypt hash actually stored. |
 
-`POST /api/v1/auth/login` returns a signed **HS256** JWT. Every claim below is stable.
+## The token contract (the one table to memorise)
 
-| Claim | Present on | Meaning |
-|---|---|---|
-| `sub` | all | username |
-| `role` | all | `WARD_RECORDER` \| `PROVINCIAL_SUPERVISOR` \| `PROVINCIAL_ADMIN` |
-| `name` | all | full name - hazard services use it as the `reviewedBy` stamp |
-| `ward` | WARD_RECORDER only | the ONE ward this account may write to |
-| `hazard` | RECORDER + SUPERVISOR | the ONE hazard this account is scoped to |
-| `iss` | all | always `dpdms-auth-service` |
-| `iat`/`exp` | all | issued-at / expiry (default 720 minutes = 12 h) |
+| Claim | Value | Used for |
+|-------|-------|----------|
+| `sub` | username | who is calling |
+| `role` | `WARD_RECORDER` / `PROVINCIAL_SUPERVISOR` / `PROVINCIAL_ADMIN` | what they may do |
+| `name` | full name | becomes `reviewedBy` on approvals |
+| `ward` | e.g. `Mudzi` | recorders only — ward scoping |
+| `hazard` | `flood`/`drought`/`fire`/`zoonotic`/`mining` | recorders + supervisors — hazard scoping |
+| `iss` | `dpdms-auth-service` | issuer check in gateway + here |
+| `exp` | issue + 480 min | the gateway rejects expired tokens with 401 |
 
-Decoded payload example:
+**The secret must be identical in auth-service and api-gateway**
+(`dpdms.jwt.secret` — set `DPDMS_JWT_SECRET` in `.env` for both).
 
-```json
-{
-  "iss": "dpdms-auth-service",
-  "sub": "ward4.fire",
-  "role": "WARD_RECORDER",
-  "ward": "Ward 4",
-  "hazard": "fire",
-  "name": "Ward 4 Fire Recorder",
-  "iat": 1758300000,
-  "exp": 1758343200
-}
+## Roles × endpoints matrix
+
+| Endpoint | WARD_RECORDER | PROVINCIAL_SUPERVISOR | PROVINCIAL_ADMIN |
+|----------|:---:|:---:|:---:|
+| POST `/api/auth/login` | ✅ | ✅ | ✅ |
+| GET `/api/auth/validate` | ✅ | ✅ | ✅ |
+| POST `/api/auth/users` | ❌ 403 | ❌ 403 | ✅ |
+| GET `/api/auth/users` | ❌ 403 | ❌ 403 | ✅ |
+
+## Bootstrapping the first admin
+
+Nobody can create accounts before an admin exists, so seed one directly:
+
+```sql
+-- run once against dpdms_auth (the hash is BCrypt of "Passw0rd!")
+INSERT INTO user_accounts (username, password_hash, full_name, role, active, created_at)
+VALUES ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Provincial Admin', 'PROVINCIAL_ADMIN', true, NOW());
 ```
 
-### Rules every teammate's service must follow
+Then create everyone else through the API (see `docs/03-API-REFERENCE.md`).
+That BCrypt hash above is the standard hash for `Passw0rd!` — change it for
+anything real.
 
-1. Read the same secret from env `JWT_SECRET` (min 32 chars) - a token signed with a
-   different secret is rejected.
-2. Read `Authorization: Bearer <token>`; validate signature + expiry.
-   (Or call `GET /api/v1/auth/validate` and read the decoded scope - no secret needed.)
-3. Map claims to checks: recorder -> own ward AND own hazard; supervisor -> own hazard,
-   all wards; admin -> everything.
-4. **401** = missing/invalid/expired token. **403** = valid token, out of scope.
-5. `/internal/**` is service-to-service only - never route it through the gateway.
-
-### Role -> what a token allows
-
-| Role | ward | hazard | Allowed |
-|---|---|---|---|
-| `WARD_RECORDER` | concrete | concrete | create/edit/delete records of that hazard in that ward |
-| `PROVINCIAL_SUPERVISOR` | - | concrete | approve / reject / request-corrections for that hazard |
-| `PROVINCIAL_ADMIN` | - | - | manage accounts; review/capture across the province |
-
-**FR-SCOPE-01:** a `WARD_RECORDER` account must be pinned to one concrete ward AND one
-hazard; wildcards (`""`, blank, `"*"`, `"ALL"`) are rejected at account creation with **400**.
-
----
-
-## Endpoints
-
-| Method | Path | Auth | Notes |
-|---|---|---|---|
-| POST | `/api/v1/auth/login` | public | `{"username","password"}` -> `LoginResponse`; 401 wrong/disabled |
-| GET | `/api/v1/auth/me` | Bearer | current profile |
-| GET | `/api/v1/auth/validate` | Bearer | decoded scope of the token |
-| GET | `/api/v1/auth/users` | Bearer + PROVINCIAL_ADMIN | list accounts (no password hashes) |
-| POST | `/api/v1/auth/users` | Bearer + PROVINCIAL_ADMIN | create account; 400 bad scope, 403 non-admin, 409 duplicate |
-| PUT | `/api/v1/auth/users/{id}/status` | Bearer + PROVINCIAL_ADMIN | enable/disable |
-| GET | `/internal/recipients?ward=&hazard=` | internal | alert-service fan-out lookup |
-
-Seeded demo accounts: `admin` / `Admin@123`; `*.supervisor` / `Super@123`;
-`ward4.fire`, `ward11.fire`, `ward12.fire`, `ward13.fire` / `Ward@123`.
-
-## Running
+## Try it
 
 ```bash
-./mvnw spring-boot:run     # needs MySQL (root / Gr@nd$0n); creates dpdms_auth itself
-./mvnw test                # 22 unit tests, no database required
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Passw0rd!"}'
 ```
 
-Config: `dpdms.jwt.secret` (min 32 chars) and `dpdms.jwt.expiration-minutes` (default 720).
+## If the teacher asks
+
+- **Where is the password stored?** Only as a BCrypt hash (`$2a$10$...`); the
+  hash includes its own salt. `spring-security-crypto` gives us BCrypt without
+  any servlet security machinery.
+- **How would a stolen token be limited?** 8-hour expiry; the gateway strips
+  fake `X-User-*` headers; deactivating the account makes `validate` fail
+  immediately even if the token is still unexpired.
+- **Why 400 for ward "ALL"?** FR-SCOPE-01: wildcards at account-creation time
+  would silently widen a recorder's access, so we reject them early instead of
+  patching scoping bugs later.
