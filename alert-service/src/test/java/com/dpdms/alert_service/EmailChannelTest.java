@@ -24,7 +24,7 @@ class EmailChannelTest {
 
     @Test
     void mockModeProducesSkippedLogAndSendsNothing() {
-        EmailChannel channel = new EmailChannel(mailSender, false, "dpdms@example.com");
+        EmailChannel channel = new EmailChannel(mailSender, false, "dpdms@example.com", "smtp", "");
 
         AlertLog result = channel.send(request, "dc@province.gov.zw");
 
@@ -37,7 +37,7 @@ class EmailChannelTest {
 
     @Test
     void enabledModeSendsEmailAndLogsSent() {
-        EmailChannel channel = new EmailChannel(mailSender, true, "dpdms@example.com");
+        EmailChannel channel = new EmailChannel(mailSender, true, "dpdms@example.com", "smtp", "");
 
         AlertLog result = channel.send(request, "dc@province.gov.zw");
 
@@ -49,7 +49,7 @@ class EmailChannelTest {
     void smtpFailureIsLoggedAsFailedNotThrown() {
         doThrow(new RuntimeException("connection refused"))
                 .when(mailSender).send(any(SimpleMailMessage.class));
-        EmailChannel channel = new EmailChannel(mailSender, true, "dpdms@example.com");
+        EmailChannel channel = new EmailChannel(mailSender, true, "dpdms@example.com", "smtp", "");
 
         AlertLog result = channel.send(request, "dc@province.gov.zw");
 
