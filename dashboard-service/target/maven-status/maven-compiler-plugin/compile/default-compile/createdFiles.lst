@@ -1,5 +1,0 @@
-com/dpdms/dashboard_service/DashboardServiceApplication.class
-com/dpdms/dashboard_service/service/DashboardService.class
-com/dpdms/dashboard_service/client/HazardDataFetcher.class
-com/dpdms/dashboard_service/controller/DashboardController.class
-com/dpdms/dashboard_service/client/HazardDataFetcher$1.class

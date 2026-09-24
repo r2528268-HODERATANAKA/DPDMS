@@ -1,3 +1,0 @@
-/home/z/my-project/dpdms-full/api-gateway/src/main/java/com/dpdms/api_gateway/ApiGatewayApplication.java
-/home/z/my-project/dpdms-full/api-gateway/src/main/java/com/dpdms/api_gateway/filter/JwtChecker.java
-/home/z/my-project/dpdms-full/api-gateway/src/main/java/com/dpdms/api_gateway/filter/JwtForwardFilter.java

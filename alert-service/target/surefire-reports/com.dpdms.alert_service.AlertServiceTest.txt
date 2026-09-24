@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.dpdms.alert_service.AlertServiceTest
--------------------------------------------------------------------------------
-Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.539 s -- in com.dpdms.alert_service.AlertServiceTest

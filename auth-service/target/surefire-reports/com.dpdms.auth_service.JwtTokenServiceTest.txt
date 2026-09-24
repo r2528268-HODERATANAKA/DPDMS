@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: com.dpdms.auth_service.JwtTokenServiceTest
--------------------------------------------------------------------------------
-Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.023 s -- in com.dpdms.auth_service.JwtTokenServiceTest
