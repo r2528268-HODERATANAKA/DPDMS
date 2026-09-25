@@ -36,6 +36,8 @@ public class WhatsAppChannel implements AlertChannel {
     private final String twilioFrom;        // e.g. whatsapp:+14155238886
     private final String twilioContentSid;  // optional: required by Twilio for WhatsApp (Content API)
     private final String callmebotApiKey;   // free personal WhatsApp gateway (no business account)
+    private final String gatewayUrl;        // self-hosted gateway (Evolution API) send endpoint
+    private final String gatewayApiKey;
     private final RestClient restClient;
 
     public WhatsAppChannel(
@@ -47,7 +49,9 @@ public class WhatsAppChannel implements AlertChannel {
             @Value("${alert.twilio.auth-token:}") String twilioAuthToken,
             @Value("${alert.twilio.whatsapp-from:}") String twilioFrom,
             @Value("${alert.twilio.content-sid:}") String twilioContentSid,
-            @Value("${alert.callmebot.api-key:}") String callmebotApiKey) {
+            @Value("${alert.callmebot.api-key:}") String callmebotApiKey,
+            @Value("${alert.gateway.url:}") String gatewayUrl,
+            @Value("${alert.gateway.api-key:}") String gatewayApiKey) {
         this.provider = provider;
         this.apiUrl = apiUrl;
         this.phoneNumberId = phoneNumberId;
@@ -57,6 +61,8 @@ public class WhatsAppChannel implements AlertChannel {
         this.twilioFrom = twilioFrom;
         this.twilioContentSid = twilioContentSid == null ? "" : twilioContentSid.trim();
         this.callmebotApiKey = callmebotApiKey == null ? "" : callmebotApiKey.trim();
+        this.gatewayUrl = gatewayUrl == null ? "" : gatewayUrl.trim();
+        this.gatewayApiKey = gatewayApiKey == null ? "" : gatewayApiKey.trim();
         java.net.http.HttpClient jdk = java.net.http.HttpClient.newBuilder().build();
         org.springframework.http.client.JdkClientHttpRequestFactory factory =
                 new org.springframework.http.client.JdkClientHttpRequestFactory(jdk);
@@ -79,6 +85,9 @@ public class WhatsAppChannel implements AlertChannel {
         }
         if ("callmebot".equalsIgnoreCase(provider)) {
             return sendViaCallMeBot(request, recipient);
+        }
+        if ("local_gateway".equalsIgnoreCase(provider) || "evolution".equalsIgnoreCase(provider)) {
+            return sendViaLocalGateway(request, recipient);
         }
         log.info("[MOCK WHATSAPP] to={} body=\"{}\"", recipient, request.getMessage());
         return base(request, recipient, AlertStatus.SKIPPED)
@@ -176,6 +185,35 @@ public class WhatsAppChannel implements AlertChannel {
         } catch (Exception ex) {
             return base(request, recipient, AlertStatus.FAILED)
                     .detail("CallMeBot error: " + ex.getMessage()).build();
+        }
+    }
+
+    // Self-hosted gateway (Evolution API). POST {gatewayUrl} with header apikey=<key>,
+    // body {"number":"263...","text":"..."} where gatewayUrl ends with /message/sendText/{instance}.
+    private AlertLog sendViaLocalGateway(AlertRequest request, String recipient) {
+        if (gatewayUrl.isBlank()) {
+            return base(request, recipient, AlertStatus.SKIPPED)
+                    .detail("Local gateway not configured (need alert.gateway.url)").build();
+        }
+        try {
+            Map<String, Object> payload = Map.of(
+                    "number", metaNumber(recipient),
+                    "text", request.getMessage());
+            restClient.post()
+                    .uri(gatewayUrl)
+                    .header("apikey", gatewayApiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity();
+            return base(request, recipient, AlertStatus.SENT)
+                    .detail("WhatsApp delivered via self-hosted gateway").build();
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("Gateway error: " + ex.getStatusCode() + " " + brief(ex.getResponseBodyAsString())).build();
+        } catch (Exception ex) {
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("Gateway error: " + ex.getMessage()).build();
         }
     }
 
