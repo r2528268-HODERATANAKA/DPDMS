@@ -35,6 +35,7 @@ public class WhatsAppChannel implements AlertChannel {
     private final String twilioAuthToken;
     private final String twilioFrom;        // e.g. whatsapp:+14155238886
     private final String twilioContentSid;  // optional: required by Twilio for WhatsApp (Content API)
+    private final String callmebotApiKey;   // free personal WhatsApp gateway (no business account)
     private final RestClient restClient;
 
     public WhatsAppChannel(
@@ -45,7 +46,8 @@ public class WhatsAppChannel implements AlertChannel {
             @Value("${alert.twilio.account-sid:}") String twilioSid,
             @Value("${alert.twilio.auth-token:}") String twilioAuthToken,
             @Value("${alert.twilio.whatsapp-from:}") String twilioFrom,
-            @Value("${alert.twilio.content-sid:}") String twilioContentSid) {
+            @Value("${alert.twilio.content-sid:}") String twilioContentSid,
+            @Value("${alert.callmebot.api-key:}") String callmebotApiKey) {
         this.provider = provider;
         this.apiUrl = apiUrl;
         this.phoneNumberId = phoneNumberId;
@@ -54,6 +56,7 @@ public class WhatsAppChannel implements AlertChannel {
         this.twilioAuthToken = twilioAuthToken;
         this.twilioFrom = twilioFrom;
         this.twilioContentSid = twilioContentSid == null ? "" : twilioContentSid.trim();
+        this.callmebotApiKey = callmebotApiKey == null ? "" : callmebotApiKey.trim();
         java.net.http.HttpClient jdk = java.net.http.HttpClient.newBuilder().build();
         org.springframework.http.client.JdkClientHttpRequestFactory factory =
                 new org.springframework.http.client.JdkClientHttpRequestFactory(jdk);
@@ -73,6 +76,9 @@ public class WhatsAppChannel implements AlertChannel {
         }
         if ("meta".equalsIgnoreCase(provider)) {
             return sendViaMeta(request, recipient);
+        }
+        if ("callmebot".equalsIgnoreCase(provider)) {
+            return sendViaCallMeBot(request, recipient);
         }
         log.info("[MOCK WHATSAPP] to={} body=\"{}\"", recipient, request.getMessage());
         return base(request, recipient, AlertStatus.SKIPPED)
@@ -110,6 +116,10 @@ public class WhatsAppChannel implements AlertChannel {
                     .toBodilessEntity();
             return base(request, recipient, AlertStatus.SENT)
                     .detail("WhatsApp delivered via Twilio").build();
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            log.warn("Twilio WhatsApp to {} failed: {}", recipient, ex.getResponseBodyAsString());
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("Twilio error: " + ex.getStatusCode() + " " + brief(ex.getResponseBodyAsString())).build();
         } catch (Exception ex) {
             log.warn("Twilio WhatsApp to {} failed: {}", recipient, ex.getMessage());
             return base(request, recipient, AlertStatus.FAILED)
@@ -119,9 +129,10 @@ public class WhatsAppChannel implements AlertChannel {
 
     private AlertLog sendViaMeta(AlertRequest request, String recipient) {
         try {
+            // Meta expects the bare E.164 digits (no "whatsapp:" prefix, no "+")
             Map<String, Object> payload = Map.of(
                     "messaging_product", "whatsapp",
-                    "to", recipient,
+                    "to", metaNumber(recipient),
                     "type", "text",
                     "text", Map.of("body", request.getMessage()));
             restClient.post()
@@ -133,11 +144,54 @@ public class WhatsAppChannel implements AlertChannel {
                     .toBodilessEntity();
             return base(request, recipient, AlertStatus.SENT)
                     .detail("WhatsApp message accepted by Meta").build();
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            log.warn("Meta WhatsApp to {} failed: {}", recipient, ex.getResponseBodyAsString());
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("Cloud API error: " + ex.getStatusCode() + " " + brief(ex.getResponseBodyAsString())).build();
         } catch (Exception ex) {
             log.warn("Meta WhatsApp to {} failed: {}", recipient, ex.getMessage());
             return base(request, recipient, AlertStatus.FAILED)
                     .detail("Cloud API error: " + ex.getMessage()).build();
         }
+    }
+
+    // CallMeBot: free personal WhatsApp gateway (recipient opts in once, gets an apikey).
+    //   GET https://api.callmebot.com/whatsapp.php?phone=+263...&text=...&apikey=...
+    private AlertLog sendViaCallMeBot(AlertRequest request, String recipient) {
+        if (callmebotApiKey.isBlank()) {
+            return base(request, recipient, AlertStatus.SKIPPED)
+                    .detail("CallMeBot not configured (need alert.callmebot.api-key)").build();
+        }
+        try {
+            String phone = metaNumber(recipient); // digits only
+            String url = "https://api.callmebot.com/whatsapp.php?phone=%2B" + phone
+                    + "&text=" + java.net.URLEncoder.encode(request.getMessage(), java.nio.charset.StandardCharsets.UTF_8)
+                    + "&apikey=" + callmebotApiKey;
+            String resp = restClient.get().uri(url).retrieve().body(String.class);
+            return base(request, recipient, AlertStatus.SENT)
+                    .detail("WhatsApp via CallMeBot: " + brief(resp)).build();
+        } catch (org.springframework.web.client.RestClientResponseException ex) {
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("CallMeBot error: " + ex.getStatusCode() + " " + brief(ex.getResponseBodyAsString())).build();
+        } catch (Exception ex) {
+            return base(request, recipient, AlertStatus.FAILED)
+                    .detail("CallMeBot error: " + ex.getMessage()).build();
+        }
+    }
+
+    private String brief(String body) {
+        if (body == null || body.isBlank()) {
+            return "(no body)";
+        }
+        return body.length() > 300 ? body.substring(0, 300) : body;
+    }
+
+    private String metaNumber(String recipient) {
+        String n = recipient == null ? "" : recipient.trim();
+        if (n.startsWith("whatsapp:")) {
+            n = n.substring("whatsapp:".length());
+        }
+        return n.replace("+", "").trim();
     }
 
     private AlertLog.AlertLogBuilder base(AlertRequest request, String recipient, AlertStatus status) {
