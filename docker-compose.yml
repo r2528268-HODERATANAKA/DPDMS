@@ -78,6 +78,23 @@ services:
     ports:
       - "8083:8083"
 
+  # ---------------- Tanaka (leader): flood ----------------
+
+  flood-service:
+    build:
+      context: .
+      args: { MODULE: flood-service }
+    image: dpdms/flood-service
+    container_name: dpdms-flood
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_flood?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      ALERT_SERVICE_URL: http://alert-service:8087
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8081:8081"
+
   # ---------------- Oliver: drought + discovery (above) ----------------
 
   drought-service:
@@ -161,14 +178,20 @@ services:
       HAZARD_MINING_URL: http://mining-accident-service:8085
       # notifications (all default to mock/skip - see DEPLOYMENT.md to go live)
       ALERT_EMAIL_ENABLED: ${ALERT_EMAIL_ENABLED:-false}
+      ALERT_EMAIL_PROVIDER: ${ALERT_EMAIL_PROVIDER:-smtp}
       SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
       SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-dpdms-alerts@example.com}
       ALERT_RECIPIENTS_EMAIL: ${ALERT_RECIPIENTS_EMAIL:-}
+      ALERT_SENDGRID_API_KEY: ${ALERT_SENDGRID_API_KEY:-}
       ALERT_WHATSAPP_PROVIDER: ${ALERT_WHATSAPP_PROVIDER:-mock}
       ALERT_WHATSAPP_PHONE_NUMBER_ID: ${ALERT_WHATSAPP_PHONE_NUMBER_ID:-}
       ALERT_WHATSAPP_TOKEN: ${ALERT_WHATSAPP_TOKEN:-}
       ALERT_RECIPIENTS_WHATSAPP: ${ALERT_RECIPIENTS_WHATSAPP:-}
+      ALERT_TWILIO_ACCOUNT_SID: ${ALERT_TWILIO_ACCOUNT_SID:-}
+      ALERT_TWILIO_AUTH_TOKEN: ${ALERT_TWILIO_AUTH_TOKEN:-}
+      ALERT_TWILIO_WHATSAPP_FROM: ${ALERT_TWILIO_WHATSAPP_FROM:-whatsapp:+14155238886}
+      ALERT_TWILIO_CONTENT_SID: ${ALERT_TWILIO_CONTENT_SID:-}
       ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
       ALERT_RECIPIENTS_TELEGRAM: ${ALERT_RECIPIENTS_TELEGRAM:-}
     depends_on:
@@ -209,6 +232,18 @@ services:
       discovery: { condition: service_healthy }
     ports:
       - "8888:8888"
+
+  # ---------------- web dashboard (React SPA, added for the demo) ----------------
+
+  frontend:
+    build:
+      context: ./frontend
+    image: dpdms/frontend
+    container_name: dpdms-frontend
+    depends_on:
+      - api-gateway
+    ports:
+      - "3000:80"
 
 volumes:
   mysql-data:

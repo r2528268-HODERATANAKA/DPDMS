@@ -39,6 +39,15 @@ public class DroughtIncidentController {
         return ResponseEntity.ok(service.findAllApproved());
     }
 
+    // Role-scoped list for the web dashboard (recorders: own ward; supervisors/admins: all statuses)
+    @GetMapping("/scoped")
+    public ResponseEntity<List<DroughtIncident>> getScoped(
+            @RequestHeader(value = "X-User-Role", required = false) String role,
+            @RequestHeader(value = "X-User-Ward", required = false) String ward,
+            @RequestHeader(value = "X-User-Hazard", required = false) String hazard) {
+        return ResponseEntity.ok(service.findAllScoped(role, ward, hazard));
+    }
+
     // A recorder's own ward view, including PENDING records
     @GetMapping("/ward/{ward}")
     public ResponseEntity<List<DroughtIncident>> getByWard(@PathVariable String ward) {
