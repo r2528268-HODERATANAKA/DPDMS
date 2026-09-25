@@ -1,0 +1,214 @@
+# ============================================================
+# DPDMS - one-command deployment for the VPS (and laptops)
+#
+#   cp .env.example .env      (edit if you want real email/whatsapp/telegram)
+#   docker compose up -d --build
+#   docker compose ps
+#
+# Then:
+#   Eureka dashboard : http://<host>:8761
+#   API (everything) : http://<host>:8888/api/...
+# ============================================================
+
+services:
+
+  # ---------------- infrastructure ----------------
+
+  mysql:
+    image: mysql:8.4
+    container_name: dpdms-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Gr@nd$0n}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-Gr@nd$0n}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  discovery:
+    build:
+      context: .
+      args: { MODULE: discovery-server }
+    image: dpdms/discovery-server
+    container_name: dpdms-discovery
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ---------------- Sean: auth + fire ----------------
+
+  auth-service:
+    build:
+      context: .
+      args: { MODULE: auth-service }
+    image: dpdms/auth-service
+    container_name: dpdms-auth
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_auth?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      DPDMS_JWT_SECRET: ${DPDMS_JWT_SECRET:-dpdms-dev-secret-change-me-before-production-0123456789abcdef}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8080:8080"
+
+  fire-service:
+    build:
+      context: .
+      args: { MODULE: fire-service }
+    image: dpdms/fire-service
+    container_name: dpdms-fire
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_fire?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      ALERT_SERVICE_URL: http://alert-service:8087
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8083:8083"
+
+  # ---------------- Oliver: drought + discovery (above) ----------------
+
+  drought-service:
+    build:
+      context: .
+      args: { MODULE: drought-service }
+    image: dpdms/drought-service
+    container_name: dpdms-drought
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_drought?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      ALERT_SERVICE_URL: http://alert-service:8087
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8082:8082"
+
+  # ---------------- Rejoice: zoonotic + report ----------------
+
+  zoonotic-disease-service:
+    build:
+      context: .
+      args: { MODULE: zoonotic-disease-service }
+    image: dpdms/zoonotic-disease-service
+    container_name: dpdms-zoonotic
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_zoonotic?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      ALERT_SERVICE_URL: http://alert-service:8087
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8084:8084"
+
+  report-service:
+    build:
+      context: .
+      args: { MODULE: report-service }
+    image: dpdms/report-service
+    container_name: dpdms-report
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      HAZARD_FLOOD_URL: http://flood-service:8081
+      HAZARD_DROUGHT_URL: http://drought-service:8082
+      HAZARD_FIRE_URL: http://fire-service:8083
+      HAZARD_ZOONOTIC_URL: http://zoonotic-disease-service:8084
+      HAZARD_MINING_URL: http://mining-accident-service:8085
+    ports:
+      - "8086:8086"
+
+  # ---------------- Todzani: mining + alert ----------------
+
+  mining-accident-service:
+    build:
+      context: .
+      args: { MODULE: mining-accident-service }
+    image: dpdms/mining-accident-service
+    container_name: dpdms-mining
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_mining?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      ALERT_SERVICE_URL: http://alert-service:8087
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8085:8085"
+
+  alert-service:
+    build:
+      context: .
+      args: { MODULE: alert-service }
+    image: dpdms/alert-service
+    container_name: dpdms-alert
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dpdms_alert?createDatabaseIfNotExist=true
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      HAZARD_FLOOD_URL: http://flood-service:8081
+      HAZARD_DROUGHT_URL: http://drought-service:8082
+      HAZARD_FIRE_URL: http://fire-service:8083
+      HAZARD_ZOONOTIC_URL: http://zoonotic-disease-service:8084
+      HAZARD_MINING_URL: http://mining-accident-service:8085
+      # notifications (all default to mock/skip - see DEPLOYMENT.md to go live)
+      ALERT_EMAIL_ENABLED: ${ALERT_EMAIL_ENABLED:-false}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-dpdms-alerts@example.com}
+      ALERT_RECIPIENTS_EMAIL: ${ALERT_RECIPIENTS_EMAIL:-}
+      ALERT_WHATSAPP_PROVIDER: ${ALERT_WHATSAPP_PROVIDER:-mock}
+      ALERT_WHATSAPP_PHONE_NUMBER_ID: ${ALERT_WHATSAPP_PHONE_NUMBER_ID:-}
+      ALERT_WHATSAPP_TOKEN: ${ALERT_WHATSAPP_TOKEN:-}
+      ALERT_RECIPIENTS_WHATSAPP: ${ALERT_RECIPIENTS_WHATSAPP:-}
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_RECIPIENTS_TELEGRAM: ${ALERT_RECIPIENTS_TELEGRAM:-}
+    depends_on:
+      mysql: { condition: service_healthy }
+    ports:
+      - "8087:8087"
+
+  # ---------------- group: dashboard ----------------
+
+  dashboard-service:
+    build:
+      context: .
+      args: { MODULE: dashboard-service }
+    image: dpdms/dashboard-service
+    container_name: dpdms-dashboard
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      HAZARD_FLOOD_URL: http://flood-service:8081
+      HAZARD_DROUGHT_URL: http://drought-service:8082
+      HAZARD_FIRE_URL: http://fire-service:8083
+      HAZARD_ZOONOTIC_URL: http://zoonotic-disease-service:8084
+      HAZARD_MINING_URL: http://mining-accident-service:8085
+    ports:
+      - "8088:8088"
+
+  # ---------------- Tanaka (leader): gateway ----------------
+
+  api-gateway:
+    build:
+      context: .
+      args: { MODULE: api-gateway }
+    image: dpdms/api-gateway
+    container_name: dpdms-gateway
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery:8761/eureka
+      DPDMS_JWT_SECRET: ${DPDMS_JWT_SECRET:-dpdms-dev-secret-change-me-before-production-0123456789abcdef}
+    depends_on:
+      discovery: { condition: service_healthy }
+    ports:
+      - "8888:8888"
+
+volumes:
+  mysql-data:
