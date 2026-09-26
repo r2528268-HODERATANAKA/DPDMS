@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 // Auth endpoints:
 //   POST /api/auth/login            - everyone        -> returns a JWT
@@ -20,6 +21,7 @@ import java.util.List;
 //   POST /api/auth/users            - PROVINCIAL_ADMIN (X-User-Role header, set by the
 //                                      gateway after it verified the Bearer token)
 //   GET  /api/auth/users            - PROVINCIAL_ADMIN
+//   PUT  /api/auth/users/{id}/status - PROVINCIAL_ADMIN (enable/disable, toggles when no body)
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -52,5 +54,14 @@ public class AuthController {
     public ResponseEntity<List<UserResponse>> listUsers(
             @RequestHeader("X-User-Role") String callerRole) {
         return ResponseEntity.ok(service.listUsers(callerRole));
+    }
+
+    @PutMapping("/users/{id}/status")
+    public ResponseEntity<UserResponse> setActive(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, Boolean> body,
+            @RequestHeader("X-User-Role") String callerRole) {
+        Boolean active = (body != null) ? body.get("active") : null;
+        return ResponseEntity.ok(service.setActive(id, callerRole, active));
     }
 }

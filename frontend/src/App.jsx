@@ -34,10 +34,10 @@ export default function App() {
   const user = auth?.user || null;
   const role = user?.role || '';
 
-  const canReview = ['PROVINCIAL_SUPERVISOR', 'PROVINCIAL_ADMIN', 'SYSTEM_ADMIN'].includes(role);
+  const canReview = ['PROVINCIAL_SUPERVISOR', 'PROVINCIAL_ADMIN'].includes(role);
   const canReport = role !== 'WARD_RECORDER' && role !== '';
-  const canAlerts = ['PROVINCIAL_ADMIN', 'SYSTEM_ADMIN'].includes(role);
-  const isAdmin = role === 'SYSTEM_ADMIN';
+  const canAlerts = ['PROVINCIAL_ADMIN'].includes(role);
+  const isAdmin = role === 'PROVINCIAL_ADMIN';
 
   return (
     <AuthCtx.Provider value={{ auth, user, signIn, signOut, canReview, canReport, canAlerts, isAdmin }}>

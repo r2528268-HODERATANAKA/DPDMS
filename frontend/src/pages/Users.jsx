@@ -9,7 +9,7 @@ const EMPTY = {
   role: 'WARD_RECORDER', ward: 'Ward 1', hazard: 'flood',
 };
 
-/** User management (System Administrator only). */
+/** User management (Provincial Administrator only). */
 export default function Users() {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');

@@ -10,17 +10,11 @@ export default function Reports() {
   const myHazards = user?.role === 'PROVINCIAL_SUPERVISOR' && user?.hazard !== '*'
     ? [user.hazard] : HAZARDS;
   const [hazard, setHazard] = useState(myHazards[0]);
-  const [type, setType] = useState('summary');
-  const [incidentId, setIncidentId] = useState('');
   const [format, setFormat] = useState('pdf');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
   const download = async () => {
-    if (type === 'incident' && !incidentId) {
-      setStatus('Enter the incident ID first.');
-      return;
-    }
     setBusy(true);
     setStatus('');
     try {
@@ -55,6 +49,7 @@ export default function Reports() {
   return (
     <div>
       <h2>Reports</h2>
+      <p className="muted">Exports all approved {hazard} incidents. Pick a format and download.</p>
       <div className="card narrow">
         <div className="grid-2">
           <label>Hazard
@@ -62,19 +57,6 @@ export default function Reports() {
               {myHazards.map((h) => <option key={h}>{h}</option>)}
             </select>
           </label>
-          <label>Report type
-            <select value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="summary">District summary</option>
-              <option value="list">Incident list (bulk)</option>
-              <option value="incident">Single incident</option>
-            </select>
-          </label>
-          {type === 'incident' && (
-            <label>Incident ID
-              <input type="number" value={incidentId} onChange={(e) => setIncidentId(e.target.value)}
-                placeholder="e.g. 1" />
-            </label>
-          )}
           <label>Format
             <select value={format} onChange={(e) => setFormat(e.target.value)}>
               {FORMATS.map((f) => <option key={f}>{f}</option>)}

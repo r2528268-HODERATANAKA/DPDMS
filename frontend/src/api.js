@@ -122,7 +122,9 @@ api.interceptors.request.use((config) => {
           : {};
     } else if (id) {
       config.url = `/${p}/${id}`;
-      config.data = toTeamIncident(config.data, hazard);
+      if (config.method !== 'get' && config.method !== 'delete' && config.data) {
+        config.data = toTeamIncident(config.data, hazard);
+      }
     } else if (config.method === 'get') {
       config.url = `/${p}/scoped`; // role-scoped (recorders: own ward; supervisors/admins: all)
     } else {

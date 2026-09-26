@@ -108,6 +108,19 @@ public class AuthService {
         return repository.findAll().stream().map(this::toResponse).toList();
     }
 
+    // ---------- Enable / disable account (PROVINCIAL_ADMIN only) ----------
+    // Matches the frontend Users page: PUT /api/auth/users/{id}/status toggles
+    // active when no body is sent, or sets it when {active: true/false} is sent.
+
+    public UserResponse setActive(Long id, String callerRole, Boolean active) {
+        requireAdmin(callerRole);
+        UserAccount user = repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));
+        boolean next = (active != null) ? active : !Boolean.TRUE.equals(user.getActive());
+        user.setActive(next);
+        return toResponse(repository.save(user));
+    }
+
     // ---------- Helpers ----------
 
     private void requireAdmin(String callerRole) {

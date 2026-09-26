@@ -7,13 +7,13 @@ const STATUS_STYLES = {
 };
 const EDITABLE = ['PENDING', 'CORRECTIONS_REQUESTED'];
 const EMPTY_FORM = {
-  title: '', description: '', ward: 'Ward 1', district: 'Mudzi', province: 'Mashonaland East',
+  ward: 'Ward 1', district: 'Mudzi', province: 'Mashonaland East',
   severity: '',
   latitude: -16.75, longitude: 32.35, occurredAt: new Date().toISOString().slice(0, 10),
 };
 
 export default function Incidents() {
-  const { user, canReview, isAdmin } = useAuth();
+  const { user, canReview } = useAuth();
   // ward recorders work in exactly one hazard - hide the other tabs
   const myHazards = user?.role === 'WARD_RECORDER' && user?.hazard !== '*'
     ? [user.hazard] : HAZARDS;
@@ -49,8 +49,6 @@ export default function Incidents() {
   const openEdit = (incident) => {
     setEditId(incident.id);
     const base = {
-      title: incident.title,
-      description: incident.description,
       ward: incident.ward,
       district: incident.district,
       province: incident.province,
@@ -100,6 +98,17 @@ export default function Incidents() {
     }
   };
 
+  const remove = async (incident) => {
+    if (!window.confirm(`Delete ${incident.title}? This cannot be undone.`)) return;
+    setError('');
+    try {
+      await api.delete(`/${hazard}/incidents/${incident.id}`);
+      load();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
   const filtered = statusFilter ? list.filter((i) => i.status === statusFilter) : list;
 
   return (
@@ -107,9 +116,6 @@ export default function Incidents() {
       <div className="page-head">
         <h2>Incidents</h2>
         {isRecorder && (
-          <button className="btn primary" onClick={openCreate}>+ New {hazard} incident</button>
-        )}
-        {!isRecorder && isAdmin && (
           <button className="btn primary" onClick={openCreate}>+ New {hazard} incident</button>
         )}
       </div>
@@ -150,8 +156,11 @@ export default function Incidents() {
                 <td>{i.reportedBy}</td>
                 <td className="row-actions">
                   <button className="btn tiny" onClick={() => setDetail(i)}>View</button>
-                  {(isRecorder || isAdmin) && EDITABLE.includes(i.status) && (
+                  {isRecorder && EDITABLE.includes(i.status) && (
                     <button className="btn tiny" onClick={() => openEdit(i)}>Edit</button>
+                  )}
+                  {isRecorder && EDITABLE.includes(i.status) && (
+                    <button className="btn tiny bad" onClick={() => remove(i)}>Delete</button>
                   )}
                   {canReview && i.status === 'PENDING' && (
                     <>
@@ -173,11 +182,9 @@ export default function Incidents() {
       {form && (
         <Modal title={editId == null ? `New ${hazard} incident` : `Edit ${hazard} incident`} onClose={() => setForm(null)}>
           <form onSubmit={save} className="grid-2">
-            <label>Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
             <label>Ward<input required value={form.ward} onChange={(e) => setForm({ ...form, ward: e.target.value })} /></label>
             <label>District<input required value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></label>
             <label>Province<input required value={form.province} onChange={(e) => setForm({ ...form, province: e.target.value })} /></label>
-            <label className="span2">Description<textarea required rows="3" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
             <label>Severity
               <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
                 {SEVERITY_OPTIONS[hazard].map((s) => <option key={s}>{s}</option>)}
